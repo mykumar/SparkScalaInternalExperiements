@@ -1,0 +1,15 @@
+# url to find repo: http://mvnrepository.com/artifact/org.apache.spark/spark-sql_2.10
+# build jar: 
+sbt package
+
+# shell:
+./bin/spark-shell --master spark://analytics01:7077 --jars "/opt/bigdata/spark_extra_libs/mysql-connector-java-5.1.38-bin.jar" --driver-memory 2G --executor-memory 6G
+
+# jar:
+/opt/bigdata/spark/bin/spark-submit --master spark://analytics01:7077 --jars "/opt/bigdata/spark_extra_libs/mysql-connector-java-5.1.38-bin.jar" --driver-memory 2G --executor-memory 6G --class "SimpleApp" /tmp/simple-stats_2.11-1.0.jar
+
+spark-csv_2.10-1.3.0.jar
+ini4j-0.5.4.jar
+
+# scala plot app:
+scala -classpath "target/scala-2.11/simple-project_2.11-1.0.jar:scalaplot-0.1.jar" SimpleApp

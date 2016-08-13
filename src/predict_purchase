@@ -1,0 +1,76 @@
+val assembler = new VectorAssembler()
+
+    //--------------------                                   after signup                              -----------------------------------
+    // after-signup training data
+    val loader = new DbLoader(cache_url, user, pwd, driver)
+    val trainingAfterSignupDF = loader.loadWithPartition(sqlContext, "vanny_training_data_male_prediction", "id", "1111111", "2222222", "1000")
+    trainingAfterSignupDF.registerTempTable("vanny_training_data_male_prediction")
+    val cleanTrainAfterSignupDF = cleanData(sqlContext, "vanny_training_data_male_prediction")
+    cleanTrainAfterSignupDF.registerTempTable("a")
+    val okTrainingDF = sqlContext.sql("select cast(pnum as Double) as pnum, relationship, age, limits_index as limits, signup_device, cast(paid as Double) paid, valid_email, race_index as race," +
+      " traffic_source_index as traffic_source, price_parity_index as price_parity, public_pics, private_pics, profile_complete, logins, females_been_viewed, viewed_by_females," +
+      " winks_send, winks_received, favourites_add, favourites_received, private_key_request, ghost_msg" +
+      " from a").repartition(partitionNum.toInt)
+    okTrainingDF.cache()
+
+    assembler
+      .setInputCols(Array("relationship", "age", "limits", "signup_device", "valid_email", "race", "traffic_source", "price_parity", "public_pics", "private_pics", "profile_complete", "logins", "females_been_viewed", "viewed_by_females", "winks_send", "winks_received", "favourites_add", "favourites_received", "private_key_request", "ghost_msg"))
+      .setOutputCol("features")
+    val outputTrain = assembler.transform(okTrainingDF)
+    val trainTemp = outputTrain.select("paid", "features")
+    val trainLPAfterSignup = trainTemp.map{
+      case Row(paid: Double, features: Vector) => LabeledPoint(paid, features)
+    }.toDF()
+
+    // new after-signup data
+    val newAfterSignupDF = fetchAfterSignupNewData(sqlContext, user, pwd)
+    newAfterSignupDF.registerTempTable("purchase_prediction_daily_collect_demograph_behavior_full_data")
+    val cleanNewAfterSignupDF = cleanData(sqlContext, "purchase_prediction_daily_collect_demograph_behavior_full_data")
+    cleanNewAfterSignupDF.registerTempTable("b")
+    val okTestDF = sqlContext.sql("select cast(pnum as Double) as pnum, relationship, age, limits_index as limits, signup_device, cast(paid as Double) paid, valid_email, race_index as race," +
+      " traffic_source_index as traffic_source, price_parity_index as price_parity, public_pics, private_pics, profile_complete, logins, females_been_viewed, viewed_by_females," +
+      " winks_send, winks_received, favourites_add, favourites_received, private_key_request, ghost_msg" +
+      " from b").repartition(partitionNum.toInt)
+    okTestDF.cache()
+
+    assembler
+      .setInputCols(Array("relationship", "age", "limits", "signup_device",valid_email", "race", "traffic_source", "price_parity", "public_pics", "private_pics", "profile_complete", "logins", "females_been_viewed", "viewed_by_females", "winks_send", "winks_received", "favourites_add", "favourites_received", "private_key_request", "ghost_msg"))
+      .setOutputCol("features")
+    val outputTest = assembler.transform(okTestDF)
+
+    val testTemp = outputTest.select("paid", "features")
+    val testLPAfterSignup = testTemp.map{
+      case Row(paid: Double, features: Vector) => LabeledPoint(paid, features)
+    }.toDF()
+
+    val testTempInTest = outputTest.select("pnum", "features")
+    val testLPAfterSignupInTest = testTempInTest.map{
+      case Row(pnum: Double, features: Vector) => LabeledPoint(pnum, features)
+    }.toDF()
+
+    val lpTotal = trainLPAfterSignup.unionAll(testLPAfterSignup)
+
+    // modeling
+    val labelIndexer = new StringIndexer()
+      .setInputCol("label")
+      .setOutputCol("indexedLabel")
+      .fit(lpTotal)
+    val featureIndexer = new VectorIndexer()
+      .setInputCol("features")
+      .setOutputCol("indexedFeatures")
+      .fit(lpTotal)
+    val rf = new RandomForestClassifier()
+      .setLabelCol("indexedLabel")
+      .setFeaturesCol("indexedFeatures")
+      .setNumTrees(2000)
+      .setMaxDepth(5)
+      .setMaxBins(32)
+    val labelConverter = new IndexToString()
+      .setInputCol("prediction")
+      .setOutputCol("predictedLabel")
+      .setLabels(labelIndexer.labels)
+    val pipeline = new Pipeline()
+      .setStages(Array(labelIndexer, featureIndexer, rf, labelConverter))
+    val modelAfterSignup = pipeline.fit(trainLPAfterSignup)
+    val predictionsAfterSignup = modelAfterSignup.transform(testLPAfterSignupInTest)
+    val resAfterSignup = predictionsAfterSignup.select("predictedLabel", "label")
